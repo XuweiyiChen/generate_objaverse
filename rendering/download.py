@@ -14,7 +14,7 @@ object_uids = [line.strip() for line in lines]
 print('file number:', len(object_uids))
 
 # objaverse.BASE_PATH = '/home/projects/Diffusion4D/rendering/'
-objaverse._VERSIONED_PATH = 'obj_v1/'
+objaverse._VERSIONED_PATH = 'obj_v2/'
 objaverse.load_objects(
     uids=object_uids,
     download_processes=multiprocessing_cpu_count

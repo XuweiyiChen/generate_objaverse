@@ -17,9 +17,9 @@ parser.add_argument("--mode_multi", type=int, default=0)
 parser.add_argument("--mode_static", type=int, default=0)
 parser.add_argument("--mode_front_view", type=int, default=0)
 parser.add_argument("--mode_four_view", type=int, default=0)
-parser.add_argument("--sh_dir", type=str, default="./sh_scripts", help="Directory to save generated .sh files")
-parser.add_argument("--sbatch_dir", type=str, default="./sbatch_logs", help="Directory to save sbatch logs")
-parser.add_argument("--sbatch_save_file", type=str, default="./submit_all.sh", help="File to save all sbatch commands")
+parser.add_argument("--sh_dir", type=str, default="./sh_scripts_2", help="Directory to save generated .sh files")
+parser.add_argument("--sbatch_dir", type=str, default="./sbatch_logs_2", help="Directory to save sbatch logs")
+parser.add_argument("--sbatch_save_file", type=str, default="./submit_all_2.sh", help="File to save all sbatch commands")
 
 args = parser.parse_args()
 

@@ -1,4 +1,8 @@
 rendering/blender-3.2.2-linux-x64
-rendering/output
+rendering/output/
 rendering/obj_data
+rendering/obj_*
+rendering/sbatch_*
+rendering/sh_script*
 .DS_Store
+env
