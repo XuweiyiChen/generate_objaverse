@@ -742,7 +742,7 @@ class MetadataExtractor:
 def place_camera(time, camera_pose_mode="random", camera_dist_min=2.0, camera_dist_max=2.0,Direction_type='front',elevation=0,azimuth=0,az_front_vector=None):
     camera_dist = random.uniform(camera_dist_min, camera_dist_max)
     if camera_pose_mode == "random":
-        randomize_camera(camera_dist=camera_dist,Direction_type=Direction_type,az_front_vector=az_front_vector)
+        randomize_camera(camera_dist=camera_dist, Direction_type=Direction_type,az_front_vector=az_front_vector)
         # bpy.ops.view3d.camera_to_view_selected()
     elif camera_pose_mode == "z-circular":
         pan_camera(time, axis="Z", camera_dist=camera_dist,elevation=elevation,Direction_type=Direction_type,azimuth=azimuth)
@@ -1016,8 +1016,8 @@ def render_object(
             place_camera(
                 t,
                 camera_pose_mode="random",
-                camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max,
+                camera_dist_min=1.5,
+                camera_dist_max=3,
                 Direction_type='multi',
                 elevation=elevation,
                 azimuth=azimuth
