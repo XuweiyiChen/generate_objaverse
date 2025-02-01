@@ -1010,7 +1010,24 @@ def render_object(
             scene.render.filepath = render_path
             bpy.ops.render.render(write_still=True)
             write_camera_metadata(os.path.join(output_dir, f"right.json"))
-    
+
+        if args.mode_multi_random:
+            t = frame / max(frame_num - 1, 1)
+            place_camera(
+                t,
+                camera_pose_mode="random",
+                camera_dist_min=camera_dist_min,
+                camera_dist_max=camera_dist_max,
+                Direction_type='multi',
+                elevation=elevation,
+                azimuth=azimuth
+            )
+            bpy.context.scene.frame_set(frame)
+            render_path = os.path.join(output_dir, f"multi_frame_random{frame}.png")  #view and frame 
+            scene.render.filepath = render_path
+            bpy.ops.render.render(write_still=True)
+            write_camera_metadata(os.path.join(output_dir, f"multi_random{frame}.json"))    
+            
     for frame in range(frame_num):
         if  args.mode_static:
             t = frame / max(frame_num - 1, 1)
@@ -1112,6 +1129,13 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="Render images of front views at each time step.",
+    )
+    
+    parser.add_argument(
+        "--mode_multi_random",
+        type=int,
+        default=0,
+        help="Render multi-view images at each time step with slightly randomness."
     )
 
     argv = sys.argv[sys.argv.index("--") + 1 :]

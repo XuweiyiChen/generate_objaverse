@@ -1,8 +1,12 @@
 rendering/blender-3.2.2-linux-x64
 rendering/output/
+rendering/output_2
 rendering/obj_data
 rendering/obj_*
 rendering/sbatch_*
 rendering/sh_script*
 .DS_Store
 env
+4d-bpy
+rendering/4d_tracking_output
+rendering/vertex_tracking_output

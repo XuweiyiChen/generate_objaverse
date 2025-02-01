@@ -14,6 +14,7 @@ parser.add_argument("--azimuth_aug", type=int, default=0)
 parser.add_argument("--elevation_aug", type=int, default=0)
 parser.add_argument("--resolution", default=256)
 parser.add_argument("--mode_multi", type=int, default=0)
+parser.add_argument("--mode_multi_random", type=int, default=0)
 parser.add_argument("--mode_static", type=int, default=0)
 parser.add_argument("--mode_front_view", type=int, default=0)
 parser.add_argument("--mode_four_view", type=int, default=0)
@@ -72,7 +73,8 @@ def generate_command(args, glb_file, file_name):
         --mode_multi {args.mode_multi} \
         --mode_static {args.mode_static} \
         --mode_front {args.mode_front_view} \
-        --mode_four_view {args.mode_four_view}"
+        --mode_four_view {args.mode_four_view} \
+        --mode_multi_random {args.mode_multi_random}"
     return command
 
 
