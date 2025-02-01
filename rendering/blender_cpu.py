@@ -788,28 +788,64 @@ def set_camera(direction, camera_dist=2.0,Direction_type='front',az_front_vector
 
     bpy.context.view_layer.update()
 
-def write_camera_metadata(path):
-    x_fov, y_fov = scene_fov()
-    bbox_min, bbox_max = scene_bbox()
-    matrix = bpy.context.scene.camera.matrix_world
-    matrix_world_np = np.array(matrix)
-    
+def write_camera_metadata(path, rendered_path):
+    """Writes camera metadata in the required format."""
+    width = bpy.context.scene.render.resolution_x
+    height = bpy.context.scene.render.resolution_y
+    focal_length = bpy.context.scene.camera.data.lens  # Focal length in mm
+    sensor_width = bpy.context.scene.camera.data.sensor_width  # Sensor width in mm
+
+    # Compute intrinsic parameters
+    fx = (focal_length / sensor_width) * width
+    fy = (focal_length / sensor_width) * height
+    cx, cy = width / 2.0, height / 2.0  # Principal point assumed to be center
+
+    # Get world-to-camera transformation matrix
+    matrix_world = bpy.context.scene.camera.matrix_world
+    w2c_matrix = np.linalg.inv(np.array(matrix_world))  # Invert to get world-to-camera
+
+    # Get camera location
+    camera_location = list(matrix_world.col[3])[:3]
+
+    # Create dictionary in the expected format
+    camera_metadata = {
+        "w": width,
+        "h": height,
+        "fx": fx,
+        "fy": fy,
+        "cx": cx,
+        "cy": cy,
+        "w2c": w2c_matrix.tolist(),
+        "file_path": str(rendered_path),
+        "blender_camera_location": camera_location
+    }
+
+    # Write to file
     with open(path, "w") as f:
-        json.dump(
-            dict(
-                matrix_world=matrix_world_np.tolist(),
-                format_version=6,
-                max_depth=5.0,
-                bbox=[list(bbox_min), list(bbox_max)],
-                origin=list(matrix.col[3])[:3],
-                x_fov=x_fov,
-                y_fov=y_fov,
-                x=list(matrix.col[0])[:3],
-                y=list(-matrix.col[1])[:3],
-                z=list(-matrix.col[2])[:3],
-            ),
-            f,
-        )
+        json.dump(camera_metadata, f, indent=4)
+        
+# def write_camera_metadata(path):
+#     x_fov, y_fov = scene_fov()
+#     bbox_min, bbox_max = scene_bbox()
+#     matrix = bpy.context.scene.camera.matrix_world
+#     matrix_world_np = np.array(matrix)
+    
+#     with open(path, "w") as f:
+#         json.dump(
+#             dict(
+#                 matrix_world=matrix_world_np.tolist(),
+#                 format_version=6,
+#                 max_depth=5.0,
+#                 bbox=[list(bbox_min), list(bbox_max)],
+#                 origin=list(matrix.col[3])[:3],
+#                 x_fov=x_fov,
+#                 y_fov=y_fov,
+#                 x=list(matrix.col[0])[:3],
+#                 y=list(-matrix.col[1])[:3],
+#                 z=list(-matrix.col[2])[:3],
+#             ),
+#             f,
+#         )
 
 def scene_fov():
     x_fov = bpy.context.scene.camera.data.angle_x
@@ -822,229 +858,371 @@ def scene_fov():
         x_fov = 2 * math.atan(math.tan(y_fov / 2) * width / height)
     return x_fov, y_fov
 
+import os
+import bpy
+import json
+import math
+import numpy as np
+from mathutils import Vector
 
 def render_object(
     object_file: str,
     frame_num: int,
     only_northern_hemisphere: bool,
     output_dir: str,
-    elevation:int,
-    azimuth:float,
+    elevation: int,
+    azimuth: float,
 ) -> None:
-    """Saves rendered images with its camera matrix and metadata of the object.
+    """Renders an object and saves images with aggregated camera metadata."""
 
-    Args:
-        object_file (str): Path to the object file.
-        frame_num (int): Number of renders to save of the object.
-        only_northern_hemisphere (bool): Whether to only render sides of the object that
-            are in the northern hemisphere. This is useful for rendering objects that
-            are photogrammetrically scanned, as the bottom of the object often has
-            holes.
-        output_dir (str): Path to the directory where the rendered images and metadata
-            will be saved.
-
-    Returns:
-        None
-    """
     os.makedirs(output_dir, exist_ok=True)
+    metadata_list = {"frames": []}  # Aggregating metadata in a single JSON structure
 
-    # load the object
+    # Load object
     if object_file.endswith(".blend"):
         bpy.ops.object.mode_set(mode="OBJECT")
-        #bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS')
         reset_cameras()
         delete_invisible_objects()
     else:
         reset_scene()
         load_object(object_file)
 
-    # Set up cameras
-    # cam = scene.objects["Camera"]
-    # cam.data.lens = 35
-    # cam.data.sensor_width = 32
+    # Extract and store object metadata
+    metadata_extractor = MetadataExtractor(object_path=object_file, scene=scene, bdata=bpy.data)
+    object_metadata = metadata_extractor.get_metadata()
+    metadata_list["object_metadata"] = object_metadata  # Add object-wide metadata
 
-    # # Set up camera constraints
-    # cam_constraint = cam.constraints.new(type="TRACK_TO")
-    # cam_constraint.track_axis = "TRACK_NEGATIVE_Z"
-    # cam_constraint.up_axis = "UP_Y"
-    # empty = bpy.data.objects.new("Empty", None)
-    # scene.collection.objects.link(empty)
-    # cam_constraint.target = empty
-
-    # Extract the metadata. This must be done before normalizing the scene to get
-    # accurate bounding box information.
-    metadata_extractor = MetadataExtractor(
-        object_path=object_file, scene=scene, bdata=bpy.data
-    )
-    metadata = metadata_extractor.get_metadata()
-    print(metadata)
-
-    # delete all objects that are not meshes
-    if object_file.lower().endswith(".usdz"):
-        # don't delete missing textures on usdz files, lots of them are embedded
-        missing_textures = None
-    else:
-        missing_textures = delete_missing_textures()
-    metadata["missing_textures"] = missing_textures
-
-    # possibly apply a random color to all objects
-    if object_file.endswith(".stl") or object_file.endswith(".ply"):
-        assert len(bpy.context.selected_objects) == 1
-        rand_color = apply_single_random_color_to_all_objects()
-        metadata["random_color"] = rand_color
-    else:
-        metadata["random_color"] = None
-
-    # save metadata
-    metadata_path = os.path.join(output_dir, "metadata.json")
-    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, sort_keys=True, indent=2)
-
-    # normalize the scene
+    # Normalize scene and randomize lighting
     normalize_scene()
-
-    # randomize the lighting
     randomize_lighting()
-    # camera = bpy.data.objects["Camera"]
-    # camera.location = Vector((0.0, -4.0, 0.0))
-    # look_at(camera, Vector((0.0, 0.0, 0.0)))
 
-    
-    camera_pose="random"
-    camera_dist_min=2
-    camera_dist_max=2
-    # render the images
-
+    # Camera settings
+    camera_pose = "random"
+    camera_dist_min = 2
+    camera_dist_max = 2
 
     angle = azimuth * math.pi * 2
     direction = [math.sin(angle), math.cos(angle), 0]
     direction_az = Vector(direction).normalized()
-        
+
     for frame in range(frame_num):
+        frame_metadata_multi = {}
+        frame_metadata_front = {}
+        frame_metadata_back = {}
+        frame_metadata_left = {}
+        frame_metadata_right = {}
+        frame_metadata_multi_random = {}
+        
+        metadata_vars = {
+            "multi": frame_metadata_multi,
+            "front": frame_metadata_front,
+            "back": frame_metadata_back,
+            "left": frame_metadata_left,
+            "right": frame_metadata_right,
+            "multi_random": frame_metadata_multi_random
+        }
+
         if args.mode_multi:
             t = frame / max(frame_num - 1, 1)
             place_camera(
-                t,
-                camera_pose_mode="z-circular",
-                camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max,
-                Direction_type='multi',
-                elevation=elevation,
-                azimuth=azimuth
+                t, camera_pose_mode="z-circular", camera_dist_min=camera_dist_min,
+                camera_dist_max=camera_dist_max, Direction_type='multi',
+                elevation=elevation, azimuth=azimuth
             )
             bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"multi_frame{frame}.png")  #view and frame 
+            render_path = os.path.join(output_dir, f"multi_frame{frame}.png")
             scene.render.filepath = render_path
             bpy.ops.render.render(write_still=True)
-            write_camera_metadata(os.path.join(output_dir, f"multi{frame}.json"))    
-    
+            metadata_vars["multi"]["mode"] = "multi"
+            metadata_vars["multi"]["timestamp"] = frame
+            metadata_vars["multi"].update(get_camera_metadata(render_path))
 
         if args.mode_front:
-            place_camera(
-                0,
-                camera_pose_mode="random",
-                camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max,
-                Direction_type='az_front',
-                az_front_vector=direction_az
-            )
+            place_camera(0, camera_pose_mode="random", camera_dist_min=camera_dist_min,
+                         camera_dist_max=camera_dist_max, Direction_type='az_front',
+                         az_front_vector=direction_az)
             bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"front_frame{frame}.png")  #view and frame 
+            render_path = os.path.join(output_dir, f"front_frame{frame}.png")
             scene.render.filepath = render_path
             bpy.ops.render.render(write_still=True)
-            
-            write_camera_metadata(os.path.join(output_dir, f"front.json"))
-        
-        #print('args.mode_four_view:',args.mode_four_view)
+            metadata_vars["front"]["mode"] = "front"
+            metadata_vars["front"]["timestamp"] = frame
+            metadata_vars["front"].update(get_camera_metadata(render_path))
+
         if args.mode_four_view:
-             #front
-            place_camera(
-                0,
-                camera_pose_mode="random",
-                camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max,
-                Direction_type='front'
-                )
-            bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"front_frame{frame}.png")  #view and frame 
-            scene.render.filepath = render_path
-            bpy.ops.render.render(write_still=True)
-            write_camera_metadata(os.path.join(output_dir, f"front.json"))
-            
-            place_camera(
-                0,
-                camera_pose_mode="random",
-                camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max,
-                Direction_type='back'
-                )
-            bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"back_frame{frame}.png")  #view and frame 
-            scene.render.filepath = render_path
-            bpy.ops.render.render(write_still=True)
-            write_camera_metadata(os.path.join(output_dir, f"back.json"))
-            
-            place_camera(
-                0,
-                camera_pose_mode="random",
-                camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max,
-                Direction_type='left'
-                )
-            bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"left_frame{frame}.png")  #view and frame 
-            scene.render.filepath = render_path
-            bpy.ops.render.render(write_still=True)
-            write_camera_metadata(os.path.join(output_dir, f"left.json"))
-            
-            place_camera(
-                0,
-                camera_pose_mode="random",
-                camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max,
-                Direction_type='right'
-                )
-            bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"right_frame{frame}.png")  #view and frame 
-            scene.render.filepath = render_path
-            bpy.ops.render.render(write_still=True)
-            write_camera_metadata(os.path.join(output_dir, f"right.json"))
+            for view in ["front", "back", "left", "right"]:
+                place_camera(0, camera_pose_mode="random", camera_dist_min=camera_dist_min,
+                             camera_dist_max=camera_dist_max, Direction_type=view)
+                bpy.context.scene.frame_set(frame)
+                render_path = os.path.join(output_dir, f"{view}_frame{frame}.png")
+                scene.render.filepath = render_path
+                bpy.ops.render.render(write_still=True)
+                metadata_vars[view]["mode"] = view
+                metadata_vars[view]["timestamp"] = frame
+                metadata_vars[view].update(get_camera_metadata(render_path))
 
         if args.mode_multi_random:
             t = frame / max(frame_num - 1, 1)
-            place_camera(
-                t,
-                camera_pose_mode="random",
-                camera_dist_min=1.5,
-                camera_dist_max=3,
-                Direction_type='multi',
-                elevation=elevation,
-                azimuth=azimuth
-            )
+            place_camera(t, camera_pose_mode="random", camera_dist_min=1.5,
+                         camera_dist_max=3, Direction_type='multi',
+                         elevation=elevation, azimuth=azimuth)
             bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"multi_frame_random{frame}.png")  #view and frame 
+            render_path = os.path.join(output_dir, f"multi_frame_random{frame}.png")
             scene.render.filepath = render_path
             bpy.ops.render.render(write_still=True)
-            write_camera_metadata(os.path.join(output_dir, f"multi_random{frame}.json"))    
+            metadata_vars["multi_random"]["mode"] = view
+            metadata_vars["multi_random"]["timestamp"] = frame
+            metadata_vars["multi_random"].update(get_camera_metadata(render_path))
+
+        metadata_list["frames"].append(metadata_vars)
+
+    # Save metadata file for each configuration separately
+    metadata_filename = os.path.join(output_dir, f"metadata_objaverse.json")
+    with open(metadata_filename, "w", encoding="utf-8") as f:
+        json.dump(metadata_list, f, indent=4)
+
+def get_camera_metadata(render_path):
+    """Returns camera metadata dictionary for the given render path."""
+    x_fov, y_fov = scene_fov()
+    matrix = bpy.context.scene.camera.matrix_world
+    matrix_np = np.array(matrix)
+    
+    return {
+        "file_path": render_path,
+        "w": bpy.context.scene.render.resolution_x,
+        "h": bpy.context.scene.render.resolution_y,
+        "fx": bpy.context.scene.camera.data.lens,
+        "fy": bpy.context.scene.camera.data.lens,
+        "cx": bpy.context.scene.render.resolution_x / 2.0,
+        "cy": bpy.context.scene.render.resolution_y / 2.0,
+        "x_fov": x_fov,
+        "y_fov": y_fov,
+        "w2c": matrix_np.tolist(),
+        "blender_camera_location": list(matrix.col[3])[:3]
+    }
+
+# def render_object(
+#     object_file: str,
+#     frame_num: int,
+#     only_northern_hemisphere: bool,
+#     output_dir: str,
+#     elevation:int,
+#     azimuth:float,
+# ) -> None:
+#     """Saves rendered images with its camera matrix and metadata of the object.
+
+#     Args:
+#         object_file (str): Path to the object file.
+#         frame_num (int): Number of renders to save of the object.
+#         only_northern_hemisphere (bool): Whether to only render sides of the object that
+#             are in the northern hemisphere. This is useful for rendering objects that
+#             are photogrammetrically scanned, as the bottom of the object often has
+#             holes.
+#         output_dir (str): Path to the directory where the rendered images and metadata
+#             will be saved.
+
+#     Returns:
+#         None
+#     """
+#     os.makedirs(output_dir, exist_ok=True)
+
+#     # load the object
+#     if object_file.endswith(".blend"):
+#         bpy.ops.object.mode_set(mode="OBJECT")
+#         #bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS')
+#         reset_cameras()
+#         delete_invisible_objects()
+#     else:
+#         reset_scene()
+#         load_object(object_file)
+
+#     # Set up cameras
+#     # cam = scene.objects["Camera"]
+#     # cam.data.lens = 35
+#     # cam.data.sensor_width = 32
+
+#     # # Set up camera constraints
+#     # cam_constraint = cam.constraints.new(type="TRACK_TO")
+#     # cam_constraint.track_axis = "TRACK_NEGATIVE_Z"
+#     # cam_constraint.up_axis = "UP_Y"
+#     # empty = bpy.data.objects.new("Empty", None)
+#     # scene.collection.objects.link(empty)
+#     # cam_constraint.target = empty
+
+#     # Extract the metadata. This must be done before normalizing the scene to get
+#     # accurate bounding box information.
+#     metadata_extractor = MetadataExtractor(
+#         object_path=object_file, scene=scene, bdata=bpy.data
+#     )
+#     metadata = metadata_extractor.get_metadata()
+#     print(metadata)
+
+#     # delete all objects that are not meshes
+#     if object_file.lower().endswith(".usdz"):
+#         # don't delete missing textures on usdz files, lots of them are embedded
+#         missing_textures = None
+#     else:
+#         missing_textures = delete_missing_textures()
+#     metadata["missing_textures"] = missing_textures
+
+#     # possibly apply a random color to all objects
+#     if object_file.endswith(".stl") or object_file.endswith(".ply"):
+#         assert len(bpy.context.selected_objects) == 1
+#         rand_color = apply_single_random_color_to_all_objects()
+#         metadata["random_color"] = rand_color
+#     else:
+#         metadata["random_color"] = None
+
+#     # save metadata
+#     metadata_path = os.path.join(output_dir, "metadata.json")
+#     os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+#     with open(metadata_path, "w", encoding="utf-8") as f:
+#         json.dump(metadata, f, sort_keys=True, indent=2)
+
+#     # normalize the scene
+#     normalize_scene()
+
+#     # randomize the lighting
+#     randomize_lighting()
+#     # camera = bpy.data.objects["Camera"]
+#     # camera.location = Vector((0.0, -4.0, 0.0))
+#     # look_at(camera, Vector((0.0, 0.0, 0.0)))
+
+    
+#     camera_pose="random"
+#     camera_dist_min=2
+#     camera_dist_max=2
+#     # render the images
+
+
+#     angle = azimuth * math.pi * 2
+#     direction = [math.sin(angle), math.cos(angle), 0]
+#     direction_az = Vector(direction).normalized()
+        
+#     for frame in range(frame_num):
+#         if args.mode_multi:
+#             t = frame / max(frame_num - 1, 1)
+#             place_camera(
+#                 t,
+#                 camera_pose_mode="z-circular",
+#                 camera_dist_min=camera_dist_min,
+#                 camera_dist_max=camera_dist_max,
+#                 Direction_type='multi',
+#                 elevation=elevation,
+#                 azimuth=azimuth
+#             )
+#             bpy.context.scene.frame_set(frame)
+#             render_path = os.path.join(output_dir, f"multi_frame{frame}.png")  #view and frame 
+#             scene.render.filepath = render_path
+#             bpy.ops.render.render(write_still=True)
+#             write_camera_metadata(os.path.join(output_dir, f"multi{frame}.json"), render_path)    
+    
+
+#         if args.mode_front:
+#             place_camera(
+#                 0,
+#                 camera_pose_mode="random",
+#                 camera_dist_min=camera_dist_min,
+#                 camera_dist_max=camera_dist_max,
+#                 Direction_type='az_front',
+#                 az_front_vector=direction_az
+#             )
+#             bpy.context.scene.frame_set(frame)
+#             render_path = os.path.join(output_dir, f"front_frame{frame}.png")  #view and frame 
+#             scene.render.filepath = render_path
+#             bpy.ops.render.render(write_still=True)
             
-    for frame in range(frame_num):
-        if  args.mode_static:
-            t = frame / max(frame_num - 1, 1)
-            place_camera(
-                t,
-                camera_pose_mode="z-circular",
-                camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max,
-                Direction_type='multi',
-                elevation=elevation,
-                azimuth=azimuth
-            )
-            bpy.context.scene.frame_set(0)
-            render_path = os.path.join(output_dir, f"multi_static_frame{frame}.png")  #view and frame 
-            scene.render.filepath = render_path
-            bpy.ops.render.render(write_still=True)
-            write_camera_metadata(os.path.join(output_dir, f"static{frame}.json"))   
+#             write_camera_metadata(os.path.join(output_dir, f"front.json"), render_path)
+        
+#         #print('args.mode_four_view:',args.mode_four_view)
+#         if args.mode_four_view:
+#              #front
+#             place_camera(
+#                 0,
+#                 camera_pose_mode="random",
+#                 camera_dist_min=camera_dist_min,
+#                 camera_dist_max=camera_dist_max,
+#                 Direction_type='front'
+#                 )
+#             bpy.context.scene.frame_set(frame)
+#             render_path = os.path.join(output_dir, f"front_frame{frame}.png")  #view and frame 
+#             scene.render.filepath = render_path
+#             bpy.ops.render.render(write_still=True)
+#             write_camera_metadata(os.path.join(output_dir, f"front.json"), render_path)
+            
+#             place_camera(
+#                 0,
+#                 camera_pose_mode="random",
+#                 camera_dist_min=camera_dist_min,
+#                 camera_dist_max=camera_dist_max,
+#                 Direction_type='back'
+#                 )
+#             bpy.context.scene.frame_set(frame)
+#             render_path = os.path.join(output_dir, f"back_frame{frame}.png")  #view and frame 
+#             scene.render.filepath = render_path
+#             bpy.ops.render.render(write_still=True)
+#             write_camera_metadata(os.path.join(output_dir, f"back.json"), render_path)
+            
+#             place_camera(
+#                 0,
+#                 camera_pose_mode="random",
+#                 camera_dist_min=camera_dist_min,
+#                 camera_dist_max=camera_dist_max,
+#                 Direction_type='left'
+#                 )
+#             bpy.context.scene.frame_set(frame)
+#             render_path = os.path.join(output_dir, f"left_frame{frame}.png")  #view and frame 
+#             scene.render.filepath = render_path
+#             bpy.ops.render.render(write_still=True)
+#             write_camera_metadata(os.path.join(output_dir, f"left.json"), render_path)
+            
+#             place_camera(
+#                 0,
+#                 camera_pose_mode="random",
+#                 camera_dist_min=camera_dist_min,
+#                 camera_dist_max=camera_dist_max,
+#                 Direction_type='right'
+#                 )
+#             bpy.context.scene.frame_set(frame)
+#             render_path = os.path.join(output_dir, f"right_frame{frame}.png")  #view and frame 
+#             scene.render.filepath = render_path
+#             bpy.ops.render.render(write_still=True)
+#             write_camera_metadata(os.path.join(output_dir, f"right.json"), render_path)
+
+#         if args.mode_multi_random:
+#             t = frame / max(frame_num - 1, 1)
+#             place_camera(
+#                 t,
+#                 camera_pose_mode="random",
+#                 camera_dist_min=1.5,
+#                 camera_dist_max=3,
+#                 Direction_type='multi',
+#                 elevation=elevation,
+#                 azimuth=azimuth
+#             )
+#             bpy.context.scene.frame_set(frame)
+#             render_path = os.path.join(output_dir, f"multi_frame_random{frame}.png")  #view and frame 
+#             scene.render.filepath = render_path
+#             bpy.ops.render.render(write_still=True)
+#             write_camera_metadata(os.path.join(output_dir, f"multi_random{frame}.json"), render_path)    
+            
+#     for frame in range(frame_num):
+#         if  args.mode_static:
+#             t = frame / max(frame_num - 1, 1)
+#             place_camera(
+#                 t,
+#                 camera_pose_mode="z-circular",
+#                 camera_dist_min=camera_dist_min,
+#                 camera_dist_max=camera_dist_max,
+#                 Direction_type='multi',
+#                 elevation=elevation,
+#                 azimuth=azimuth
+#             )
+#             bpy.context.scene.frame_set(0)
+#             render_path = os.path.join(output_dir, f"multi_static_frame{frame}.png")  #view and frame 
+#             scene.render.filepath = render_path
+#             bpy.ops.render.render(write_still=True)
+#             write_camera_metadata(os.path.join(output_dir, f"static{frame}.json"), render_path)   
     
 
 
