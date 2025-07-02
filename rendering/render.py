@@ -20,12 +20,20 @@ parser.add_argument("--mode_four_view", type=int, default=0)
 
 
 args = parser.parse_args()
-
+identifiers = [
+    "ba7b382c918b40e6b07011da4ff3ebc0",
+    "29c26c661f1c47aabb245c9b2f896455",
+    "53abad43280a4b7ab26bd0e6b8dea62f",
+    "22bbb0b7ca4d4d63b47b1367984aa7ce",
+    "26adfd631730494ab0fc80c806eada77",
+    "a1c936d72a9f4fa0ac15033339bd6efe",
+    "9fea6ffd67b840cb970f5b4570794709"
+]
 #read objavsers glb path
 glb_files = []
 for root, dirs, files in os.walk(args.obj_path):
     for file in files:
-        if file.endswith('.glb'):
+        if file.endswith('.glb') and any(identifier in file for identifier in identifiers):
             glb_file_path = os.path.join(root, file)
             glb_files.append(glb_file_path)
 
@@ -61,7 +69,8 @@ def execute_command(args,glb_file, gpu_id,file_name):
         --mode_multi {args.mode_multi}\
         --mode_static {args.mode_static}\
         --mode_front {args.mode_front_view}\
-        --mode_four_view {args.mode_four_view}'
+        --mode_four_view {args.mode_four_view}\
+        --mode_multi_random {args.multi_random}'
                                 
     print('command:',command)
     logging.info(f'Executing command: {command}')

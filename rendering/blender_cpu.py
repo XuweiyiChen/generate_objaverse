@@ -6,6 +6,7 @@ import math
 import os
 import random
 import sys
+
 print(sys.path)
 from typing import Any, Callable, Dict, Generator, List, Literal, Optional, Set, Tuple
 from mathutils.noise import random_unit_vector
@@ -13,6 +14,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 import os
+
 # import imageio
 # from skimage.metrics import structural_similarity as ssim
 
@@ -44,6 +46,9 @@ def reset_cameras() -> None:
     # Rename the new camera to 'NewDefaultCamera'
     new_camera = bpy.context.active_object
     new_camera.name = "Camera"
+    new_camera.data.lens = (
+        34.57  # Approximate focal length for 50° FOV with 32mm sensor
+    )
 
     # Set the new camera as the active camera for the scene
     scene.camera = new_camera
@@ -138,10 +143,14 @@ def _sample_spherical(
 #     return camera
 
 
-def randomize_camera(camera_dist=2.0,Direction_type='front',az_front_vector=None):
+def randomize_camera(camera_dist=2.0, Direction_type="front", az_front_vector=None):
     direction = random_unit_vector()
-    set_camera(direction, camera_dist=camera_dist,Direction_type=Direction_type,az_front_vector=az_front_vector)
-
+    set_camera(
+        direction,
+        camera_dist=camera_dist,
+        Direction_type=Direction_type,
+        az_front_vector=az_front_vector,
+    )
 
 
 def _set_camera_at_size(i: int, scale: float = 1.5) -> bpy.types.Object:
@@ -519,9 +528,9 @@ def delete_missing_textures() -> Dict[str, Any]:
                                     random_color = [random.random() for _ in range(3)]
                                     file_path_to_color[file_path] = random_color + [1]
 
-                                connected_node.inputs[
-                                    "Base Color"
-                                ].default_value = file_path_to_color[file_path]
+                                connected_node.inputs["Base Color"].default_value = (
+                                    file_path_to_color[file_path]
+                                )
 
                             # Delete the TEX_IMAGE node
                             material.node_tree.nodes.remove(node)
@@ -739,54 +748,148 @@ class MetadataExtractor:
             "armature_count": self.get_armature_count(),
         }
 
-def place_camera(time, camera_pose_mode="random", camera_dist_min=2.0, camera_dist_max=2.0,Direction_type='front',elevation=0,azimuth=0,az_front_vector=None):
+
+def place_camera(
+    time,
+    camera_pose_mode="random",
+    camera_dist_min=1.0,
+    camera_dist_max=1.5,
+    Direction_type="front",
+    elevation=0,
+    azimuth=0,
+    az_front_vector=None,
+):
     camera_dist = random.uniform(camera_dist_min, camera_dist_max)
     if camera_pose_mode == "random":
-        randomize_camera(camera_dist=camera_dist, Direction_type=Direction_type,az_front_vector=az_front_vector)
+        randomize_camera(
+            camera_dist=camera_dist,
+            Direction_type=Direction_type,
+            az_front_vector=az_front_vector,
+        )
         # bpy.ops.view3d.camera_to_view_selected()
     elif camera_pose_mode == "z-circular":
-        pan_camera(time, axis="Z", camera_dist=camera_dist,elevation=elevation,Direction_type=Direction_type,azimuth=azimuth)
+        pan_camera(
+            time,
+            axis="Z",
+            camera_dist=camera_dist,
+            elevation=elevation,
+            Direction_type=Direction_type,
+            azimuth=azimuth,
+            camera_pose_mode=camera_pose_mode,
+        )
     elif camera_pose_mode == "z-circular-elevated":
-        pan_camera(time, axis="Z", camera_dist=camera_dist, elevation=0.2617993878,Direction_type=Direction_type)
+        pan_camera(
+            time,
+            axis="Z",
+            camera_dist=camera_dist,
+            elevation=0.2617993878,
+            Direction_type=Direction_type,
+            camera_pose_mode=camera_pose_mode,
+        )
+    elif camera_pose_mode == "front_to_back":
+        pan_camera(
+            time,
+            axis="Z",
+            camera_dist=camera_dist,
+            Direction_type="left",
+            camera_pose_mode=camera_pose_mode,
+        )
+    elif camera_pose_mode == "back_to_front":
+        pan_camera(
+            time,
+            axis="Z",
+            camera_dist=camera_dist,
+            Direction_type="right",
+            camera_pose_mode=camera_pose_mode,
+        )
     else:
         raise ValueError(f"Unknown camera pose mode: {camera_pose_mode}")
 
-def pan_camera(time, axis="Z", camera_dist=2.0, elevation=-0.1,Direction_type='multi',azimuth=0):
-    angle = (math.pi *2 -time * math.pi * 2)+ azimuth * math.pi * 2
-    #example  15-345
-    direction = [-math.cos(angle), -math.sin(angle), -elevation]
-    direction = [math.sin(angle), math.cos(angle), -elevation]
-    assert axis in ["X", "Y", "Z"]
-    if axis == "X":
-        direction = [direction[2], *direction[:2]]
-    elif axis == "Y":
-        direction = [direction[0], -elevation, direction[1]]
-    direction = Vector(direction).normalized()
-    set_camera(direction, camera_dist=camera_dist,Direction_type=Direction_type)
+
+def pan_camera(
+    time, axis="Z", camera_dist=2.0, elevation=-0.1, Direction_type="multi", 
+    azimuth=0, camera_pose_mode=None
+):
+    # Calculate angle based on camera pose mode
+    if camera_pose_mode == "front_to_back":
+        angle = time * math.pi + azimuth * math.pi * 2
+    elif camera_pose_mode == "back_to_front":
+        angle = math.pi - time * math.pi + azimuth * math.pi * 2
+    else:
+        angle = (math.pi * 2 - time * math.pi * 2) + azimuth * math.pi * 2
+    
+    # Get the base direction based on Direction_type
+    if Direction_type == "front":
+        base_direction = Vector((0, 1, 0))
+    elif Direction_type == "back":
+        base_direction = Vector((0, -1, 0))
+    elif Direction_type == "left":
+        base_direction = Vector((1, 0, 0))
+    elif Direction_type == "right":
+        base_direction = Vector((-1, 0, 0))
+    elif Direction_type == "az_front" and az_front_vector is not None:
+        base_direction = az_front_vector
+    else:
+        # Calculate direction for standard multi mode
+        direction = [math.sin(angle), math.cos(angle), -elevation]
+        assert axis in ["X", "Y", "Z"]
+        if axis == "X":
+            direction = [direction[2], *direction[:2]]
+        elif axis == "Y":
+            direction = [direction[0], -elevation, direction[1]]
+        direction = Vector(direction).normalized()
+        set_camera(direction, camera_dist=camera_dist, Direction_type="multi")
+        return
+    
+    # Apply rotation to the base direction
+    # Create rotation matrix around Z axis
+    rot_z = Matrix.Rotation(angle, 3, 'Z')
+    # Apply rotation to base direction
+    final_direction = rot_z @ base_direction
+    
+    # Apply elevation
+    if elevation != 0:
+        # First find perpendicular vector to rotate around
+        up_vector = Vector((0, 0, 1))
+        rotation_axis = final_direction.cross(up_vector).normalized()
+        
+        # Create rotation matrix for elevation
+        rot_elev = Matrix.Rotation(math.radians(elevation * 180), 3, rotation_axis)
+        final_direction = rot_elev @ final_direction
+    
+    final_direction = final_direction.normalized()
+    
+    # Set camera using our calculated direction
+    set_camera(final_direction, camera_dist=camera_dist, Direction_type="custom")
 
 
-def set_camera(direction, camera_dist=2.0,Direction_type='front',az_front_vector=None):
-    if Direction_type=='front':
-        direction=Vector((0, 1, 0)).normalized()
-    elif Direction_type=='back':
-        direction=Vector((0, -1, 0)).normalized()
-    elif Direction_type=='left':
-        direction=Vector((1, 0, 0)).normalized()  
-    elif Direction_type=='right':
-        direction=Vector((-1, 0, 0)).normalized()  
-    elif Direction_type=='az_front':
-        direction=az_front_vector
+def set_camera(
+    direction, camera_dist=2.0, Direction_type="front", az_front_vector=None
+):
+    if Direction_type == "front":
+        direction = Vector((0, 1, 0)).normalized()
+    elif Direction_type == "back":
+        direction = Vector((0, -1, 0)).normalized()
+    elif Direction_type == "left":
+        direction = Vector((1, 0, 0)).normalized()
+    elif Direction_type == "right":
+        direction = Vector((-1, 0, 0)).normalized()
+    elif Direction_type == "az_front":
+        direction = az_front_vector
+    elif Direction_type == "custom":
+        # Use the direction as is - it's already been calculated
+        pass
     
-    
-    print('direction:',direction)
+    print("direction:", direction)
     camera_pos = -camera_dist * direction
     bpy.context.scene.camera.location = camera_pos
 
-    # https://blender.stackexchange.com/questions/5210/pointing-the-camera-in-a-particular-direction-programmatically
+    # Point camera toward origin
     rot_quat = direction.to_track_quat("-Z", "Y")
     bpy.context.scene.camera.rotation_euler = rot_quat.to_euler()
 
     bpy.context.view_layer.update()
+
 
 def write_camera_metadata(path, rendered_path):
     """Writes camera metadata in the required format."""
@@ -817,19 +920,20 @@ def write_camera_metadata(path, rendered_path):
         "cy": cy,
         "w2c": w2c_matrix.tolist(),
         "file_path": str(rendered_path),
-        "blender_camera_location": camera_location
+        "blender_camera_location": camera_location,
     }
 
     # Write to file
     with open(path, "w") as f:
         json.dump(camera_metadata, f, indent=4)
-        
+
+
 # def write_camera_metadata(path):
 #     x_fov, y_fov = scene_fov()
 #     bbox_min, bbox_max = scene_bbox()
 #     matrix = bpy.context.scene.camera.matrix_world
 #     matrix_world_np = np.array(matrix)
-    
+
 #     with open(path, "w") as f:
 #         json.dump(
 #             dict(
@@ -847,6 +951,7 @@ def write_camera_metadata(path, rendered_path):
 #             f,
 #         )
 
+
 def scene_fov():
     x_fov = bpy.context.scene.camera.data.angle_x
     y_fov = bpy.context.scene.camera.data.angle_y
@@ -858,12 +963,216 @@ def scene_fov():
         x_fov = 2 * math.atan(math.tan(y_fov / 2) * width / height)
     return x_fov, y_fov
 
+
 import os
 import bpy
 import json
 import math
 import numpy as np
 from mathutils import Vector
+
+
+def save_ply(frame, output_dir, vertices):
+    """Save vertex positions and colors as a PLY file."""
+    ply_path = os.path.join(output_dir, f"frame_{frame}.ply")
+
+    with open(ply_path, "w") as ply_file:
+        # PLY Header
+        ply_file.write("ply\n")
+        ply_file.write("format ascii 1.0\n")
+        ply_file.write(f"element vertex {len(vertices)}\n")
+        ply_file.write("property float x\n")
+        ply_file.write("property float y\n")
+        ply_file.write("property float z\n")
+        ply_file.write("property uchar red\n")
+        ply_file.write("property uchar green\n")
+        ply_file.write("property uchar blue\n")
+        ply_file.write("end_header\n")
+
+        # Write vertex data
+        for v in vertices:
+            x, y, z = v["position"]
+            r, g, b = v["color"]
+            ply_file.write(f"{x} {y} {z} {int(r*255)} {int(g*255)} {int(b*255)}\n")
+
+    print(f"Saved PLY: {ply_path}")
+
+
+def get_vertex_data(obj):
+    """Extract vertex positions and colors from the specified object."""
+    if obj is None or obj.type != "MESH":
+        print("Error: No valid mesh object found.")
+        return []
+
+    # Ensure we are in Object Mode
+    if obj.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+    mesh = obj.data  # Access mesh data
+    mesh.calc_loop_triangles()  # Ensure triangulated mesh for vertex access
+
+    world_matrix = obj.matrix_world  # Convert local to world coordinates
+
+    # Force Blender to update the scene to get correct vertex positions
+    bpy.context.view_layer.update()
+
+    vertex_data = []
+
+    # Check if vertex colors exist
+    color_layer = mesh.vertex_colors.active.data if mesh.vertex_colors else None
+
+    for loop in mesh.loops:
+        vertex_index = loop.vertex_index
+        vertex = mesh.vertices[vertex_index]
+
+        world_coord = world_matrix @ vertex.co  # Convert local to world coords
+
+        # Get vertex color if available, otherwise use white
+        if color_layer:
+            color = color_layer[loop.index].color[:3]
+        else:
+            color = (1.0, 1.0, 1.0)  # Default to white if no color info
+
+        vertex_data.append(
+            {
+                "position": [world_coord.x, world_coord.y, world_coord.z],
+                "color": [color[0], color[1], color[2]],
+            }
+        )
+
+    return vertex_data
+
+
+# def export_static_obj(output_dir, filename):
+#     """Exports the scene (or selected object) as a static GLB file."""
+#     os.makedirs(output_dir, exist_ok=True)
+#     export_path = os.path.join(output_dir, filename)
+#     breakpoint()
+#     bpy.ops.export_scene.obj(
+#         filepath=export_path,
+#         keep_vertex_order=True,  # Preserve vertex indices
+#         use_materials=True,  # Ensure material (`.mtl`) is saved
+#     )
+
+#     return export_path  # Return the path for metadata storage
+
+# def export_static_obj(output_dir, filename):
+#     """Exports the entire scene as an OBJ file, ensuring vertex colors are included."""
+
+#     os.makedirs(output_dir, exist_ok=True)
+#     export_path = os.path.join(output_dir, filename)
+#     # Ensure all objects have a material that supports vertex colors
+#     for obj in bpy.data.objects:
+#         if obj.type == "MESH" and obj.data.vertex_colors:
+#             mat = bpy.data.materials.new(name="VertexColorMaterial")
+#             mat.use_nodes = True
+#             nodes = mat.node_tree.nodes
+#             links = mat.node_tree.links
+
+#             # Clear existing nodes
+#             for node in nodes:
+#                 nodes.remove(node)
+
+#             # Create necessary nodes
+#             output_node = nodes.new(type="ShaderNodeOutputMaterial")
+#             output_node.location = (400, 0)
+
+#             principled_node = nodes.new(type="ShaderNodeBsdfPrincipled")
+#             principled_node.location = (200, 0)
+
+#             vc_node = nodes.new(type="ShaderNodeVertexColor")
+#             vc_node.location = (-200, 0)
+#             vc_node.layer_name = (
+#                 obj.data.vertex_colors.active.name
+#             )  # Use active vertex color layer
+
+#             # Link vertex color to base color
+#             links.new(vc_node.outputs["Color"], principled_node.inputs["Base Color"])
+#             links.new(principled_node.outputs["BSDF"], output_node.inputs["Surface"])
+
+#             # Assign material to object
+#             obj.data.materials.append(mat)
+
+#     # Export the entire scene
+#     bpy.ops.export_scene.obj(
+#         filepath=export_path,
+#         use_materials=True,  # Export materials
+#         keep_vertex_order=True,  # Preserve vertex indices
+#     )
+
+#     print(f"✅ Exported scene as OBJ with vertex colors: {export_path}")
+#     return export_path
+
+
+def convert_non_mesh_objects():
+    """Converts all non-mesh objects into actual MESH objects."""
+    bpy.ops.object.select_all(action="DESELECT")
+
+    for obj in bpy.data.objects:
+        if obj.type not in ["MESH", "CAMERA", "LIGHT"]:
+            bpy.context.view_layer.objects.active = obj
+            obj.select_set(True)
+
+            try:
+                bpy.ops.object.convert(target="MESH")  # Convert to mesh
+                print(f"✅ Converted '{obj.name}' to MESH.")
+            except RuntimeError:
+                print(f"⚠️ Could not convert '{obj.name}'. Skipping.")
+
+            obj.select_set(False)  # Deselect after conversion
+
+
+def export_scene_with_converted_mesh(output_dir, filename):
+    """Converts all objects to mesh and exports the scene as an OBJ file."""
+    os.makedirs(output_dir, exist_ok=True)
+    export_path = os.path.join(output_dir, filename)
+
+    # Convert all non-mesh objects
+    convert_non_mesh_objects()
+
+    # Export scene
+    bpy.ops.export_scene.obj(
+        filepath=export_path,
+        use_materials=True,  # Export materials
+        keep_vertex_order=True,  # Preserve vertex indices
+    )
+
+    print(f"✅ Exported converted scene as OBJ: {export_path}")
+    return export_path
+
+
+# def get_vertex_data():
+#     """Extract vertex positions and colors from the GLB object."""
+#     obj = bpy.context.object  # Get active object
+#     if obj.type != 'MESH':
+#         return []  # Return empty if not a mesh
+
+#     mesh = obj.data  # Access mesh data
+#     mesh.calc_loop_triangles()  # Ensure triangulated mesh for vertex access
+
+#     world_matrix = obj.matrix_world  # Convert local to world coordinates
+
+#     vertex_data = []
+
+#     # Check if vertex colors exist
+#     color_layer = mesh.vertex_colors.active.data if mesh.vertex_colors else None
+
+#     for loop in mesh.loops:
+#         vertex_index = loop.vertex_index
+#         vertex = mesh.vertices[vertex_index]
+
+#         world_coord = world_matrix @ vertex.co  # Convert local to world coords
+
+#         # Get vertex color if available, otherwise use white
+#         color = color_layer[loop.index].color[:3] if color_layer else (1.0, 1.0, 1.0)
+
+#         vertex_data.append({
+#             "position": [world_coord.x, world_coord.y, world_coord.z],
+#             "color": [color[0], color[1], color[2]]
+#         })
+
+#     return vertex_data
+
 
 def render_object(
     object_file: str,
@@ -888,7 +1197,9 @@ def render_object(
         load_object(object_file)
 
     # Extract and store object metadata
-    metadata_extractor = MetadataExtractor(object_path=object_file, scene=scene, bdata=bpy.data)
+    metadata_extractor = MetadataExtractor(
+        object_path=object_file, scene=scene, bdata=bpy.data
+    )
     object_metadata = metadata_extractor.get_metadata()
     metadata_list["object_metadata"] = object_metadata  # Add object-wide metadata
 
@@ -898,49 +1209,66 @@ def render_object(
 
     # Camera settings
     camera_pose = "random"
-    camera_dist_min = 2
-    camera_dist_max = 2
+    camera_dist_min = 1.5
+    camera_dist_max = 1.5
 
     angle = azimuth * math.pi * 2
     direction = [math.sin(angle), math.cos(angle), 0]
     direction_az = Vector(direction).normalized()
-
+    # breakpoint()
     for frame in range(frame_num):
+        frame += 24
         frame_metadata_multi = {}
         frame_metadata_front = {}
         frame_metadata_back = {}
         frame_metadata_left = {}
         frame_metadata_right = {}
         frame_metadata_multi_random = {}
-        
+        frame_metadata_front_to_back = {}
+        frame_metadata_back_to_front = {}
+
         metadata_vars = {
             "multi": frame_metadata_multi,
             "front": frame_metadata_front,
             "back": frame_metadata_back,
             "left": frame_metadata_left,
             "right": frame_metadata_right,
-            "multi_random": frame_metadata_multi_random
+            "multi_random": frame_metadata_multi_random,
+            "front_to_back": frame_metadata_front_to_back,
+            "back_to_front": frame_metadata_back_to_front,
         }
 
         if args.mode_multi:
             t = frame / max(frame_num - 1, 1)
             place_camera(
-                t, camera_pose_mode="z-circular", camera_dist_min=camera_dist_min,
-                camera_dist_max=camera_dist_max, Direction_type='multi',
-                elevation=elevation, azimuth=azimuth
+                t,
+                camera_pose_mode="z-circular",
+                camera_dist_min=camera_dist_min,
+                camera_dist_max=camera_dist_max,
+                Direction_type="multi",
+                elevation=elevation,
+                azimuth=azimuth,
             )
             bpy.context.scene.frame_set(frame)
             render_path = os.path.join(output_dir, f"multi_frame{frame}.png")
             scene.render.filepath = render_path
+            # # Export GLB
+            # glb_filename = f"frame_{frame}.obj"
+            # glb_path = export_static_obj(output_dir, glb_filename)
             bpy.ops.render.render(write_still=True)
             metadata_vars["multi"]["mode"] = "multi"
             metadata_vars["multi"]["timestamp"] = frame
             metadata_vars["multi"].update(get_camera_metadata(render_path))
 
         if args.mode_front:
-            place_camera(0, camera_pose_mode="random", camera_dist_min=camera_dist_min,
-                         camera_dist_max=camera_dist_max, Direction_type='az_front',
-                         az_front_vector=direction_az)
+            place_camera(
+                0,
+                camera_pose_mode="random",
+                camera_dist_min=camera_dist_min,
+                camera_dist_max=camera_dist_max,
+                Direction_type="az_front",
+                az_front_vector=direction_az,
+            )
             bpy.context.scene.frame_set(frame)
             render_path = os.path.join(output_dir, f"front_frame{frame}.png")
             scene.render.filepath = render_path
@@ -951,8 +1279,13 @@ def render_object(
 
         if args.mode_four_view:
             for view in ["front", "back", "left", "right"]:
-                place_camera(0, camera_pose_mode="random", camera_dist_min=camera_dist_min,
-                             camera_dist_max=camera_dist_max, Direction_type=view)
+                place_camera(
+                    0,
+                    camera_pose_mode="z-circular",
+                    camera_dist_min=camera_dist_min,
+                    camera_dist_max=camera_dist_max,
+                    Direction_type=view,
+                )
                 bpy.context.scene.frame_set(frame)
                 render_path = os.path.join(output_dir, f"{view}_frame{frame}.png")
                 scene.render.filepath = render_path
@@ -963,9 +1296,15 @@ def render_object(
 
         if args.mode_multi_random:
             t = frame / max(frame_num - 1, 1)
-            place_camera(t, camera_pose_mode="random", camera_dist_min=1.5,
-                         camera_dist_max=3, Direction_type='multi',
-                         elevation=elevation, azimuth=azimuth)
+            place_camera(
+                t,
+                camera_pose_mode="random",
+                camera_dist_min=1.5,
+                camera_dist_max=3,
+                Direction_type="multi",
+                elevation=elevation,
+                azimuth=azimuth,
+            )
             bpy.context.scene.frame_set(frame)
             render_path = os.path.join(output_dir, f"multi_frame_random{frame}.png")
             scene.render.filepath = render_path
@@ -973,6 +1312,52 @@ def render_object(
             metadata_vars["multi_random"]["mode"] = view
             metadata_vars["multi_random"]["timestamp"] = frame
             metadata_vars["multi_random"].update(get_camera_metadata(render_path))
+        
+        if args.two_rotate:
+            if frame % 2 == 0:
+                t = frame / max(frame_num - 1, 1) 
+                # step_frame = frame // 2
+                place_camera(
+                    t,
+                    camera_pose_mode="front_to_back",
+                    camera_dist_min=camera_dist_min,
+                    camera_dist_max=camera_dist_max,
+                    Direction_type="front_to_back",
+                    elevation=elevation,
+                    azimuth=azimuth,
+                )
+                bpy.context.scene.frame_set(frame)
+                render_path = os.path.join(output_dir, f"dual_rotate_frame_front_to_back_{frame}.png")
+                scene.render.filepath = render_path
+                bpy.ops.render.render(write_still=True)
+                
+                # Store metadata for first camera
+                metadata_vars["front_to_back"]["mode"] = "front_to_back"
+                metadata_vars["front_to_back"]["timestamp"] = frame
+                metadata_vars["front_to_back"].update(get_camera_metadata(render_path))
+
+            if frame % 2 == 1:
+                t = frame / max(frame_num - 1, 1)
+                # step_frame = frame // 2 + 1
+
+                place_camera(
+                    t,
+                    camera_pose_mode="back_to_front",
+                    camera_dist_min=camera_dist_min,
+                    camera_dist_max=camera_dist_max,
+                    Direction_type="back_to_front",
+                    elevation=elevation,
+                    azimuth=azimuth,
+                )
+                bpy.context.scene.frame_set(frame)
+                render_path = os.path.join(output_dir, f"dual_rotate_frame_back_to_front_{frame}.png")
+                scene.render.filepath = render_path
+                bpy.ops.render.render(write_still=True)
+                
+                # Store metadata for second camera
+                metadata_vars["back_to_front"]["mode"] = "back_to_front"
+                metadata_vars["back_to_front"]["timestamp"] = frame
+                metadata_vars["back_to_front"].update(get_camera_metadata(render_path))
 
         metadata_list["frames"].append(metadata_vars)
 
@@ -981,259 +1366,54 @@ def render_object(
     with open(metadata_filename, "w", encoding="utf-8") as f:
         json.dump(metadata_list, f, indent=4)
 
+
 def get_camera_metadata(render_path):
     """Returns camera metadata dictionary for the given render path."""
+    # Get FOVs from Blender
     x_fov, y_fov = scene_fov()
-    matrix = bpy.context.scene.camera.matrix_world
-    matrix_np = np.array(matrix)
-    
+
+    # Get Blender camera intrinsic parameters
+    w = bpy.context.scene.render.resolution_x
+    h = bpy.context.scene.render.resolution_y
+
+    # Compute fx and fy from FOVs
+    fx = w / (2.0 * np.tan(x_fov / 2.0))
+    fy = h / (2.0 * np.tan(y_fov / 2.0))
+
+    # Compute correct cx, cy (principal point in OpenCV)
+    cx = w / 2.0
+    cy = h / 2.0
+
+    # Get camera extrinsic matrix (Blender uses a different convention)
+    blender_to_cv = np.diag(
+        [1, -1, -1, 1]
+    )  # Convert Blender to OpenCV coordinate system
+    matrix_np = np.array(bpy.context.scene.camera.matrix_world) @ blender_to_cv
+    w2c = np.linalg.inv(matrix_np)  # OpenCV convention requires world-to-camera
+
     return {
         "file_path": render_path,
-        "w": bpy.context.scene.render.resolution_x,
-        "h": bpy.context.scene.render.resolution_y,
-        "fx": bpy.context.scene.camera.data.lens,
-        "fy": bpy.context.scene.camera.data.lens,
-        "cx": bpy.context.scene.render.resolution_x / 2.0,
-        "cy": bpy.context.scene.render.resolution_y / 2.0,
+        "w": w,
+        "h": h,
+        "fx": fx,
+        "fy": fy,
+        "cx": cx,
+        "cy": cy,
         "x_fov": x_fov,
         "y_fov": y_fov,
-        "w2c": matrix_np.tolist(),
-        "blender_camera_location": list(matrix.col[3])[:3]
+        "w2c": w2c.tolist(),  # Store world-to-camera transformation
+        "blender_camera_location": list(matrix_np[:3, 3]),  # Extract camera position
     }
-
-# def render_object(
-#     object_file: str,
-#     frame_num: int,
-#     only_northern_hemisphere: bool,
-#     output_dir: str,
-#     elevation:int,
-#     azimuth:float,
-# ) -> None:
-#     """Saves rendered images with its camera matrix and metadata of the object.
-
-#     Args:
-#         object_file (str): Path to the object file.
-#         frame_num (int): Number of renders to save of the object.
-#         only_northern_hemisphere (bool): Whether to only render sides of the object that
-#             are in the northern hemisphere. This is useful for rendering objects that
-#             are photogrammetrically scanned, as the bottom of the object often has
-#             holes.
-#         output_dir (str): Path to the directory where the rendered images and metadata
-#             will be saved.
-
-#     Returns:
-#         None
-#     """
-#     os.makedirs(output_dir, exist_ok=True)
-
-#     # load the object
-#     if object_file.endswith(".blend"):
-#         bpy.ops.object.mode_set(mode="OBJECT")
-#         #bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS')
-#         reset_cameras()
-#         delete_invisible_objects()
-#     else:
-#         reset_scene()
-#         load_object(object_file)
-
-#     # Set up cameras
-#     # cam = scene.objects["Camera"]
-#     # cam.data.lens = 35
-#     # cam.data.sensor_width = 32
-
-#     # # Set up camera constraints
-#     # cam_constraint = cam.constraints.new(type="TRACK_TO")
-#     # cam_constraint.track_axis = "TRACK_NEGATIVE_Z"
-#     # cam_constraint.up_axis = "UP_Y"
-#     # empty = bpy.data.objects.new("Empty", None)
-#     # scene.collection.objects.link(empty)
-#     # cam_constraint.target = empty
-
-#     # Extract the metadata. This must be done before normalizing the scene to get
-#     # accurate bounding box information.
-#     metadata_extractor = MetadataExtractor(
-#         object_path=object_file, scene=scene, bdata=bpy.data
-#     )
-#     metadata = metadata_extractor.get_metadata()
-#     print(metadata)
-
-#     # delete all objects that are not meshes
-#     if object_file.lower().endswith(".usdz"):
-#         # don't delete missing textures on usdz files, lots of them are embedded
-#         missing_textures = None
-#     else:
-#         missing_textures = delete_missing_textures()
-#     metadata["missing_textures"] = missing_textures
-
-#     # possibly apply a random color to all objects
-#     if object_file.endswith(".stl") or object_file.endswith(".ply"):
-#         assert len(bpy.context.selected_objects) == 1
-#         rand_color = apply_single_random_color_to_all_objects()
-#         metadata["random_color"] = rand_color
-#     else:
-#         metadata["random_color"] = None
-
-#     # save metadata
-#     metadata_path = os.path.join(output_dir, "metadata.json")
-#     os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-#     with open(metadata_path, "w", encoding="utf-8") as f:
-#         json.dump(metadata, f, sort_keys=True, indent=2)
-
-#     # normalize the scene
-#     normalize_scene()
-
-#     # randomize the lighting
-#     randomize_lighting()
-#     # camera = bpy.data.objects["Camera"]
-#     # camera.location = Vector((0.0, -4.0, 0.0))
-#     # look_at(camera, Vector((0.0, 0.0, 0.0)))
-
-    
-#     camera_pose="random"
-#     camera_dist_min=2
-#     camera_dist_max=2
-#     # render the images
-
-
-#     angle = azimuth * math.pi * 2
-#     direction = [math.sin(angle), math.cos(angle), 0]
-#     direction_az = Vector(direction).normalized()
-        
-#     for frame in range(frame_num):
-#         if args.mode_multi:
-#             t = frame / max(frame_num - 1, 1)
-#             place_camera(
-#                 t,
-#                 camera_pose_mode="z-circular",
-#                 camera_dist_min=camera_dist_min,
-#                 camera_dist_max=camera_dist_max,
-#                 Direction_type='multi',
-#                 elevation=elevation,
-#                 azimuth=azimuth
-#             )
-#             bpy.context.scene.frame_set(frame)
-#             render_path = os.path.join(output_dir, f"multi_frame{frame}.png")  #view and frame 
-#             scene.render.filepath = render_path
-#             bpy.ops.render.render(write_still=True)
-#             write_camera_metadata(os.path.join(output_dir, f"multi{frame}.json"), render_path)    
-    
-
-#         if args.mode_front:
-#             place_camera(
-#                 0,
-#                 camera_pose_mode="random",
-#                 camera_dist_min=camera_dist_min,
-#                 camera_dist_max=camera_dist_max,
-#                 Direction_type='az_front',
-#                 az_front_vector=direction_az
-#             )
-#             bpy.context.scene.frame_set(frame)
-#             render_path = os.path.join(output_dir, f"front_frame{frame}.png")  #view and frame 
-#             scene.render.filepath = render_path
-#             bpy.ops.render.render(write_still=True)
-            
-#             write_camera_metadata(os.path.join(output_dir, f"front.json"), render_path)
-        
-#         #print('args.mode_four_view:',args.mode_four_view)
-#         if args.mode_four_view:
-#              #front
-#             place_camera(
-#                 0,
-#                 camera_pose_mode="random",
-#                 camera_dist_min=camera_dist_min,
-#                 camera_dist_max=camera_dist_max,
-#                 Direction_type='front'
-#                 )
-#             bpy.context.scene.frame_set(frame)
-#             render_path = os.path.join(output_dir, f"front_frame{frame}.png")  #view and frame 
-#             scene.render.filepath = render_path
-#             bpy.ops.render.render(write_still=True)
-#             write_camera_metadata(os.path.join(output_dir, f"front.json"), render_path)
-            
-#             place_camera(
-#                 0,
-#                 camera_pose_mode="random",
-#                 camera_dist_min=camera_dist_min,
-#                 camera_dist_max=camera_dist_max,
-#                 Direction_type='back'
-#                 )
-#             bpy.context.scene.frame_set(frame)
-#             render_path = os.path.join(output_dir, f"back_frame{frame}.png")  #view and frame 
-#             scene.render.filepath = render_path
-#             bpy.ops.render.render(write_still=True)
-#             write_camera_metadata(os.path.join(output_dir, f"back.json"), render_path)
-            
-#             place_camera(
-#                 0,
-#                 camera_pose_mode="random",
-#                 camera_dist_min=camera_dist_min,
-#                 camera_dist_max=camera_dist_max,
-#                 Direction_type='left'
-#                 )
-#             bpy.context.scene.frame_set(frame)
-#             render_path = os.path.join(output_dir, f"left_frame{frame}.png")  #view and frame 
-#             scene.render.filepath = render_path
-#             bpy.ops.render.render(write_still=True)
-#             write_camera_metadata(os.path.join(output_dir, f"left.json"), render_path)
-            
-#             place_camera(
-#                 0,
-#                 camera_pose_mode="random",
-#                 camera_dist_min=camera_dist_min,
-#                 camera_dist_max=camera_dist_max,
-#                 Direction_type='right'
-#                 )
-#             bpy.context.scene.frame_set(frame)
-#             render_path = os.path.join(output_dir, f"right_frame{frame}.png")  #view and frame 
-#             scene.render.filepath = render_path
-#             bpy.ops.render.render(write_still=True)
-#             write_camera_metadata(os.path.join(output_dir, f"right.json"), render_path)
-
-#         if args.mode_multi_random:
-#             t = frame / max(frame_num - 1, 1)
-#             place_camera(
-#                 t,
-#                 camera_pose_mode="random",
-#                 camera_dist_min=1.5,
-#                 camera_dist_max=3,
-#                 Direction_type='multi',
-#                 elevation=elevation,
-#                 azimuth=azimuth
-#             )
-#             bpy.context.scene.frame_set(frame)
-#             render_path = os.path.join(output_dir, f"multi_frame_random{frame}.png")  #view and frame 
-#             scene.render.filepath = render_path
-#             bpy.ops.render.render(write_still=True)
-#             write_camera_metadata(os.path.join(output_dir, f"multi_random{frame}.json"), render_path)    
-            
-#     for frame in range(frame_num):
-#         if  args.mode_static:
-#             t = frame / max(frame_num - 1, 1)
-#             place_camera(
-#                 t,
-#                 camera_pose_mode="z-circular",
-#                 camera_dist_min=camera_dist_min,
-#                 camera_dist_max=camera_dist_max,
-#                 Direction_type='multi',
-#                 elevation=elevation,
-#                 azimuth=azimuth
-#             )
-#             bpy.context.scene.frame_set(0)
-#             render_path = os.path.join(output_dir, f"multi_static_frame{frame}.png")  #view and frame 
-#             scene.render.filepath = render_path
-#             bpy.ops.render.render(write_still=True)
-#             write_camera_metadata(os.path.join(output_dir, f"static{frame}.json"), render_path)   
-    
-
 
 
 def look_at(obj_camera, point):
     # Calculate the direction vector from the camera to the point
     direction = point - obj_camera.location
     # Make the camera look in this direction
-    rot_quat = direction.to_track_quat('-Z', 'Y')
+    rot_quat = direction.to_track_quat("-Z", "Y")
     obj_camera.rotation_euler = rot_quat.to_euler()
-    
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1244,7 +1424,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output_dir",
-        default='output_duck',
+        default="output_duck",
         type=str,
         help="Path to the directory where the rendered images and metadata will be saved.",
     )
@@ -1308,12 +1488,19 @@ if __name__ == "__main__":
         default=0,
         help="Render images of front views at each time step.",
     )
-    
+
     parser.add_argument(
         "--mode_multi_random",
         type=int,
         default=0,
-        help="Render multi-view images at each time step with slightly randomness."
+        help="Render multi-view images at each time step with slightly randomness.",
+    )
+
+    parser.add_argument(
+        "--two_rotate",
+        type=int,
+        default=0,
+        help="Render dual-rotate images at each time step.",
     )
 
     argv = sys.argv[sys.argv.index("--") + 1 :]
@@ -1321,6 +1508,11 @@ if __name__ == "__main__":
 
     context = bpy.context
     scene = context.scene
+    # Set FOV to 50 degrees by adjusting focal length
+    fov_deg = 50
+    sensor_width = bpy.context.scene.camera.data.sensor_width  # default is 32mm
+    focal_length = sensor_width / (2 * math.tan(math.radians(fov_deg / 2)))
+    bpy.context.scene.camera.data.lens = focal_length
     render = scene.render
 
     # Set render settings

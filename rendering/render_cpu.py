@@ -8,7 +8,9 @@ import random
 parser = argparse.ArgumentParser()
 parser.add_argument("--obj_path", type=str, default="./obj_data/hf-objaverse-v1/glbs")
 parser.add_argument("--save_dir", type=str, default="./output")
-parser.add_argument("--cpu_count", type=int, default=10, help="Number of CPUs available for processing")
+parser.add_argument(
+    "--cpu_count", type=int, default=10, help="Number of CPUs available for processing"
+)
 parser.add_argument("--frame_num", type=int, default=24)
 parser.add_argument("--azimuth_aug", type=int, default=0)
 parser.add_argument("--elevation_aug", type=int, default=0)
@@ -18,9 +20,25 @@ parser.add_argument("--mode_multi_random", type=int, default=0)
 parser.add_argument("--mode_static", type=int, default=0)
 parser.add_argument("--mode_front_view", type=int, default=0)
 parser.add_argument("--mode_four_view", type=int, default=0)
-parser.add_argument("--sh_dir", type=str, default="./sh_scripts_2", help="Directory to save generated .sh files")
-parser.add_argument("--sbatch_dir", type=str, default="./sbatch_logs_2", help="Directory to save sbatch logs")
-parser.add_argument("--sbatch_save_file", type=str, default="./submit_all_2.sh", help="File to save all sbatch commands")
+parser.add_argument("--two_rotate", type=int, default=0)
+parser.add_argument(
+    "--sh_dir",
+    type=str,
+    default="./sh_scripts_2",
+    help="Directory to save generated .sh files",
+)
+parser.add_argument(
+    "--sbatch_dir",
+    type=str,
+    default="./sbatch_logs_2",
+    help="Directory to save sbatch logs",
+)
+parser.add_argument(
+    "--sbatch_save_file",
+    type=str,
+    default="./submit_all_2.sh",
+    help="File to save all sbatch commands",
+)
 
 args = parser.parse_args()
 
@@ -41,7 +59,7 @@ for root, dirs, files in os.walk(args.obj_path):
 num_tasks = len(glb_files)
 tasks_per_cpu = ceil(num_tasks / args.cpu_count)
 cpu_task_groups = [
-    glb_files[i * tasks_per_cpu:(i + 1) * tasks_per_cpu]
+    glb_files[i * tasks_per_cpu : (i + 1) * tasks_per_cpu]
     for i in range(args.cpu_count)
 ]
 
@@ -74,7 +92,8 @@ def generate_command(args, glb_file, file_name):
         --mode_static {args.mode_static} \
         --mode_front {args.mode_front_view} \
         --mode_four_view {args.mode_four_view} \
-        --mode_multi_random {args.mode_multi_random}"
+        --mode_multi_random {args.mode_multi_random} \
+        --two_rotate {args.two_rotate}"
     return command
 
 
@@ -99,7 +118,7 @@ for cpu_idx, task_group in enumerate(cpu_task_groups):
     sbatch_command = (
         f"sbatch --job-name=render_task_{cpu_idx + 1} --partition=standard "
         f"--output={os.path.join(args.sbatch_dir, f'task_{cpu_idx + 1}_%J.out')} "
-        f"-A uva_cv_lab --nodes=1 --time=2:00:00 --cpus-per-task=1 {sh_file}"
+        f"-A uva_cv_lab --nodes=1 --time=15:00:00 --cpus-per-task=1 {sh_file}"
     )
     sbatch_commands.append(sbatch_command)
 
