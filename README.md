@@ -32,3 +32,5 @@ Note that Camera matrix and everything has been adjusted with respect to blender
 ## Other notes
 
 For installation and running rendering individually, please refer to ``README_old.md``.
+
+Special thanks to Hanwen @hwjiang1510 for the depth rendering. A lot of credites go to the Diffusion 4D :)
