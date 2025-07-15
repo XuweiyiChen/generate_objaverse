@@ -38,3 +38,4 @@ rendering/src/missing.txt
 rendering/submit_all_3.sh
 rendering/submit_all_objaverse_test.sh
 rendering/submit_all_val.sh
+rendering/output_test_png

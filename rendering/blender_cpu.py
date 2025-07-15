@@ -1174,6 +1174,43 @@ def export_scene_with_converted_mesh(output_dir, filename):
 #     return vertex_data
 
 
+def render_to_png_and_exr(rgba_path, depth_path):
+    """
+    Renders the current frame and saves RGBA as PNG and Depth as EXR files
+    using Blender's compositor with correct settings.
+    """
+    scene.use_nodes = True
+    nodes = scene.node_tree.nodes
+    links = scene.node_tree.links
+    # Clear all nodes
+    while nodes:
+        nodes.remove(nodes[0])
+    # Add render layer node
+    render_layers = nodes.new(type='CompositorNodeRLayers')
+    render_layers.location = (0, 0)
+    
+    # RGBA output node (PNG)
+    rgba_output = nodes.new(type='CompositorNodeOutputFile')
+    rgba_output.base_path = os.path.dirname(rgba_path)
+    rgba_output.file_slots[0].path = os.path.basename(rgba_path).replace(".png", "")
+    rgba_output.format.file_format = 'PNG'
+    rgba_output.format.color_mode = 'RGBA'
+    links.new(render_layers.outputs['Image'], rgba_output.inputs[0])
+    
+    # Depth output node (EXR)
+    depth_output = nodes.new(type='CompositorNodeOutputFile')
+    depth_output.base_path = os.path.dirname(depth_path)
+    depth_output.file_slots[0].path = os.path.basename(depth_path).replace(".exr", "")
+    depth_output.format.file_format = 'OPEN_EXR'
+    depth_output.format.color_mode = 'RGB'  # Use RGB instead of BW
+    links.new(render_layers.outputs['Depth'], depth_output.inputs[0])
+    
+    # Enable depth pass
+    scene.view_layers[0].use_pass_z = True
+    # Render
+    bpy.ops.render.render(write_still=True)
+
+
 def render_object(
     object_file: str,
     frame_num: int,
@@ -1217,7 +1254,6 @@ def render_object(
     direction_az = Vector(direction).normalized()
     # breakpoint()
     for frame in range(frame_num):
-        frame += 24
         frame_metadata_multi = {}
         frame_metadata_front = {}
         frame_metadata_back = {}
@@ -1250,15 +1286,12 @@ def render_object(
                 azimuth=azimuth,
             )
             bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"multi_frame{frame}.png")
-            scene.render.filepath = render_path
-            # # Export GLB
-            # glb_filename = f"frame_{frame}.obj"
-            # glb_path = export_static_obj(output_dir, glb_filename)
-            bpy.ops.render.render(write_still=True)
+            rgba_path = os.path.join(output_dir, f"multi_frame{frame}_rgba.png")
+            depth_path = os.path.join(output_dir, f"multi_frame{frame}_depth.exr")
+            render_to_png_and_exr(rgba_path, depth_path)
             metadata_vars["multi"]["mode"] = "multi"
             metadata_vars["multi"]["timestamp"] = frame
-            metadata_vars["multi"].update(get_camera_metadata(render_path))
+            metadata_vars["multi"].update(get_camera_metadata(rgba_path))
 
         if args.mode_front:
             place_camera(
@@ -1270,12 +1303,12 @@ def render_object(
                 az_front_vector=direction_az,
             )
             bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"front_frame{frame}.png")
-            scene.render.filepath = render_path
-            bpy.ops.render.render(write_still=True)
+            rgba_path = os.path.join(output_dir, f"front_frame{frame}_rgba.png")
+            depth_path = os.path.join(output_dir, f"front_frame{frame}_depth.exr")
+            render_to_png_and_exr(rgba_path, depth_path)
             metadata_vars["front"]["mode"] = "front"
             metadata_vars["front"]["timestamp"] = frame
-            metadata_vars["front"].update(get_camera_metadata(render_path))
+            metadata_vars["front"].update(get_camera_metadata(rgba_path))
 
         if args.mode_four_view:
             for view in ["front", "back", "left", "right"]:
@@ -1287,12 +1320,12 @@ def render_object(
                     Direction_type=view,
                 )
                 bpy.context.scene.frame_set(frame)
-                render_path = os.path.join(output_dir, f"{view}_frame{frame}.png")
-                scene.render.filepath = render_path
-                bpy.ops.render.render(write_still=True)
+                rgba_path = os.path.join(output_dir, f"{view}_frame{frame}_rgba.png")
+                depth_path = os.path.join(output_dir, f"{view}_frame{frame}_depth.exr")
+                render_to_png_and_exr(rgba_path, depth_path)
                 metadata_vars[view]["mode"] = view
                 metadata_vars[view]["timestamp"] = frame
-                metadata_vars[view].update(get_camera_metadata(render_path))
+                metadata_vars[view].update(get_camera_metadata(rgba_path))
 
         if args.mode_multi_random:
             t = frame / max(frame_num - 1, 1)
@@ -1306,12 +1339,12 @@ def render_object(
                 azimuth=azimuth,
             )
             bpy.context.scene.frame_set(frame)
-            render_path = os.path.join(output_dir, f"multi_frame_random{frame}.png")
-            scene.render.filepath = render_path
-            bpy.ops.render.render(write_still=True)
+            rgba_path = os.path.join(output_dir, f"multi_frame_random{frame}_rgba.png")
+            depth_path = os.path.join(output_dir, f"multi_frame_random{frame}_depth.exr")
+            render_to_png_and_exr(rgba_path, depth_path)
             metadata_vars["multi_random"]["mode"] = view
             metadata_vars["multi_random"]["timestamp"] = frame
-            metadata_vars["multi_random"].update(get_camera_metadata(render_path))
+            metadata_vars["multi_random"].update(get_camera_metadata(rgba_path))
         
         if args.two_rotate:
             if frame % 2 == 0:
@@ -1327,14 +1360,14 @@ def render_object(
                     azimuth=azimuth,
                 )
                 bpy.context.scene.frame_set(frame)
-                render_path = os.path.join(output_dir, f"dual_rotate_frame_front_to_back_{frame}.png")
-                scene.render.filepath = render_path
-                bpy.ops.render.render(write_still=True)
+                rgba_path = os.path.join(output_dir, f"dual_rotate_frame_front_to_back_{frame}_rgba.png")
+                depth_path = os.path.join(output_dir, f"dual_rotate_frame_front_to_back_{frame}_depth.exr")
+                render_to_png_and_exr(rgba_path, depth_path)
                 
                 # Store metadata for first camera
                 metadata_vars["front_to_back"]["mode"] = "front_to_back"
                 metadata_vars["front_to_back"]["timestamp"] = frame
-                metadata_vars["front_to_back"].update(get_camera_metadata(render_path))
+                metadata_vars["front_to_back"].update(get_camera_metadata(rgba_path))
 
             if frame % 2 == 1:
                 t = frame / max(frame_num - 1, 1)
@@ -1350,14 +1383,14 @@ def render_object(
                     azimuth=azimuth,
                 )
                 bpy.context.scene.frame_set(frame)
-                render_path = os.path.join(output_dir, f"dual_rotate_frame_back_to_front_{frame}.png")
-                scene.render.filepath = render_path
-                bpy.ops.render.render(write_still=True)
+                rgba_path = os.path.join(output_dir, f"dual_rotate_frame_back_to_front_{frame}_rgba.png")
+                depth_path = os.path.join(output_dir, f"dual_rotate_frame_back_to_front_{frame}_depth.exr")
+                render_to_png_and_exr(rgba_path, depth_path)
                 
                 # Store metadata for second camera
                 metadata_vars["back_to_front"]["mode"] = "back_to_front"
                 metadata_vars["back_to_front"]["timestamp"] = frame
-                metadata_vars["back_to_front"].update(get_camera_metadata(render_path))
+                metadata_vars["back_to_front"].update(get_camera_metadata(rgba_path))
 
         metadata_list["frames"].append(metadata_vars)
 
@@ -1391,8 +1424,17 @@ def get_camera_metadata(render_path):
     matrix_np = np.array(bpy.context.scene.camera.matrix_world) @ blender_to_cv
     w2c = np.linalg.inv(matrix_np)  # OpenCV convention requires world-to-camera
 
+    # Fix the file path to include the frame number suffix
+    # The actual file will be like multi_frame24_rgba0024.png
+    # but render_path is like multi_frame24_rgba.png
+    # We need to add the frame number suffix
+    current_frame = bpy.context.scene.frame_current
+    if '_rgba.png' in render_path:
+        # Replace _rgba.png with _rgba{frame:04d}.png
+        render_path_fixed = render_path.replace('_rgba.png', f'_rgba{current_frame:04d}.png')
+
     return {
-        "file_path": render_path,
+        "file_path": render_path_fixed,
         "w": w,
         "h": h,
         "fx": fx,
@@ -1443,7 +1485,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--frame_num",
         type=int,
-        default=24,
+        default=48,
         help="Number of frames to save for the object.",
     )
     parser.add_argument(
@@ -1533,6 +1575,10 @@ if __name__ == "__main__":
     scene.cycles.filter_width = 0.01
     scene.cycles.use_denoising = True
     scene.render.film_transparent = True
+    
+    # Enable depth pass for all view layers
+    for view_layer in scene.view_layers:
+        view_layer.use_pass_z = True
 
     # Render the images
     render_object(
