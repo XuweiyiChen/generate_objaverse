@@ -39,3 +39,8 @@ rendering/submit_all_3.sh
 rendering/submit_all_objaverse_test.sh
 rendering/submit_all_val.sh
 rendering/output_test_png
+rendering/objaverse_curated
+rendering/objaverse_curated_v2
+rendering/output_dir
+rendering/src/ObjV1_curated.txt
+rendering/copy_pointclouds.py
